@@ -40,25 +40,50 @@ class ToolkitGeometryNodeHandler(object):
             raise sgtk.TankError(msg)
 
         # Get the templates from the app
-        template = self._app.get_template("work_cache_template")
+        template = self._app.get_template("output_cache_template")
 
+        # get the Step name field for the templated Mantra Output
+        entity_name = ""
+        asset_type = ""
+
+        try:
+            ctx = self._app.context
+            entity_name = ctx.entity['name']
+            entity_type = ctx.entity['type']
+        except:
+            msg="Could not set the Shotgun context Entity name."
+            self._app.log_debug(msg)
+            raise sgtk.TankError(msg)
         # create fields dict with all the metadata
-        fields = {}
-        fields["name"] = work_file_fields.get("name")
-        fields["version"] = work_file_fields["version"]
-        fields["renderpass"] = node.name()
-        fields["SEQ"] = "FORMAT: $F"
+        fields={}
 
-        # Get the camera width and height if necessary
-        if "width" in template.keys or "height" in template.keys:
-            # Get the camera
-            cam_path = node.parm("geometry1_camera").eval()
-            cam_node = hou.node(cam_path)
-            if not cam_node:
-                raise sgtk.TankError("Camera %s not found." % cam_path)
+        if entity_type == "Shot":
+            fields = {
+                "name": work_file_fields.get("name", None),
+                "node": node.name(),
+                "renderpass": node.name(),
+                "HSEQ": "FORMAT: $F",
+                "version": work_file_fields.get("version", None),
+                "Shot": entity_name,
+                "Step": work_file_fields.get("Step", None)
+            }
 
-            fields["width"] = cam_node.parm("resx").eval()
-            fields["height"] = cam_node.parm("resy").eval()
+        # Asset Template fields
+        if entity_type == "Asset":
+            # Set the Custom Asset Type
+            asset_type = work_file_fields.get("sg_asset_type", None)
+
+            fields = {
+                "name": work_file_fields.get("name", None),
+                "node": node.name(),
+                "renderpass": node.name(),
+                "HSEQ": "FORMAT: $F",
+                "version": work_file_fields.get("version", None),
+                "Asset": entity_name,
+                "sg_asset_type": asset_type,
+                "Step": work_file_fields.get("Step", None)
+            }
+
 
         fields.update(self._app.context.as_template_fields(template))
 
@@ -215,6 +240,26 @@ class ToolkitGeometryNodeHandler(object):
                 self._app.log_warning(err)
                 msg = 'Problems converting node: {0}'.format(sg_n.path())
                 self._app.log_warning(msg)
+
+    @classmethod
+    def get_all_tk_geometry_nodes(cls):
+        """
+        Returns a list of all tk-houdini-geometrynode instances in the current
+        session.
+        """
+
+        tk_node_type = ToolkitGeometryNodeHandler.SG_NODE_CLASS
+
+        # get all instances of tk geometry rop/sop nodes
+        tk_geometry_nodes = []
+        tk_geometry_nodes.extend(
+            hou.nodeType(hou.sopNodeTypeCategory(),
+                         tk_node_type).instances())
+        tk_geometry_nodes.extend(
+            hou.nodeType(hou.ropNodeTypeCategory(),
+                         tk_node_type).instances())
+
+        return tk_geometry_nodes
 
     def convert_geometry_to_sg_nodes(self):
         """
@@ -430,7 +475,7 @@ class ToolkitGeometryNodeHandler(object):
 
         # make sure we don't look for any eye - %V or SEQ - %04d stuff
         frames = self._app.tank.paths_from_template(template, fields,
-                                                    ["SEQ", "eye"])
+                                                    ["HSEQ", "eye"])
         return frames
 
     def __copy_parm_values(self, source_node, target_node, exclude=None):
